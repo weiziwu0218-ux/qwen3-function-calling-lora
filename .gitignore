@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+data/raw/
+data/processed/card_example.txt
+# Local alias of train_59000.jsonl. The committed full set is train_59000.jsonl.
+data/processed/train_full.jsonl
