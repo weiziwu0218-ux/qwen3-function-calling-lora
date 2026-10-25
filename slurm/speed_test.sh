@@ -1,8 +1,10 @@
 #!/bin/bash
 # GPU job: LoRA SFT speed test on train_1000, then validation-set scoring of
 # the trained adapter and of the zero-shot base model.
-# Submit through the group wrapper:
-#   /accounts/projects/berkeleynlp/anyaji/safe_submit.sh sbatch slurm/speed_test.sh
+# Submit through the group wrapper. The wrapper reads only command-line flags,
+# so repeat --qos and --gres there for its quota check:
+#   /accounts/projects/berkeleynlp/anyaji/safe_submit.sh sbatch --qos=preemptive \
+#       --gres=gpu:H200:1 slurm/speed_test.sh
 #SBATCH --partition=berkeleynlp
 #SBATCH --nodelist=horton
 #SBATCH --qos=preemptive
