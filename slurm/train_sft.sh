@@ -1,0 +1,47 @@
+#!/bin/bash
+# GPU job: one formal LoRA SFT run plus its validation-set scoring.
+# Formal runs use the SCF checkout on a clean, current main.
+# Usage (flags repeated on the command line for the safe_submit quota check):
+#   /accounts/projects/berkeleynlp/anyaji/safe_submit.sh sbatch --qos=preemptive \
+#       --gres=gpu:H200:1 --export=ALL,EXP=expA,TRAIN_SIZE=5000,RANK=16,ALPHA=32 slurm/train_sft.sh
+#SBATCH --partition=berkeleynlp
+#SBATCH --nodelist=horton
+#SBATCH --qos=preemptive
+#SBATCH --gres=gpu:H200:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=03:00:00
+#SBATCH --no-requeue
+#SBATCH --job-name=work
+#SBATCH --output=/data/wenruixu/workspace/qwen3-function-calling-lora/logs/train_sft_%j.out
+#SBATCH --error=/data/wenruixu/workspace/qwen3-function-calling-lora/logs/train_sft_%j.err
+set -euo pipefail
+: "${EXP:?set EXP, e.g. expA}" "${TRAIN_SIZE:?set TRAIN_SIZE}" "${RANK:?set RANK}" "${ALPHA:?set ALPHA}"
+
+CODE=/accounts/projects/berkeleynlp/wenruixu/workspace/qwen3-function-calling-lora
+ROOT=/data/wenruixu/workspace/qwen3-function-calling-lora
+PY=/data/wenruixu/venv/qwen3-fc/bin/python
+MODEL_REVISION=70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
+export HF_HOME=/data/wenruixu/cache/huggingface
+export HF_HUB_CACHE=$HF_HOME/hub
+export HF_HUB_OFFLINE=1
+
+BRANCH=$(git -C "$CODE" rev-parse --abbrev-ref HEAD)
+if [[ "$BRANCH" != main || -n "$(git -C "$CODE" status --porcelain)" ]]; then
+    echo "formal runs need a clean main checkout (found $BRANCH)" >&2
+    exit 1
+fi
+
+RUN=$ROOT/runs/$EXP/sft_n${TRAIN_SIZE}_r${RANK}_${SLURM_JOB_ID}
+echo "start $(date -Iseconds) host $(hostname) job ${SLURM_JOB_ID} commit $(git -C "$CODE" rev-parse HEAD)"
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+
+"$PY" "$CODE/train/sft_lora.py" --revision "$MODEL_REVISION" \
+    --train-file "$ROOT/data/processed/train_${TRAIN_SIZE}.jsonl" \
+    --val-file "$ROOT/data/processed/val.jsonl" \
+    --output-dir "$RUN" --rank "$RANK" --alpha "$ALPHA"
+
+"$PY" "$CODE/train/eval_val.py" --revision "$MODEL_REVISION" \
+    --adapter "$RUN/adapter" --val-file "$ROOT/data/processed/val.jsonl" \
+    --output-dir "$RUN/val"
+echo "end $(date -Iseconds)"

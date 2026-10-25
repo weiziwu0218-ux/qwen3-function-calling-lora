@@ -1,0 +1,9 @@
+# torch is installed separately from the CUDA 12.8 index:
+#   pip install "torch>=2.8,<2.10" --index-url https://download.pytorch.org/whl/cu128
+# Exact versions used on SCF are recorded per environment build (pip freeze).
+transformers>=4.56,<5
+peft>=0.17,<1
+datasets>=3,<5
+accelerate>=1.0,<2
+jinja2
+huggingface_hub
