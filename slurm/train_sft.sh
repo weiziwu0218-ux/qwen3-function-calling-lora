@@ -33,6 +33,9 @@ MODEL_REVISION=70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
 export HF_HOME=$DATA/cache/huggingface
 export HF_HUB_CACHE=$HF_HOME/hub
 export HF_HUB_OFFLINE=1
+# SCF's /etc/profile.d/SITE-huggingface.sh points TRANSFORMERS_CACHE at an empty
+# /scratch cache, which overrides HF_HUB_CACHE in transformers 4.x.
+unset TRANSFORMERS_CACHE HF_DATASETS_CACHE
 
 BRANCH=$(git -C "$CODE" rev-parse --abbrev-ref HEAD)
 if [[ "$BRANCH" != main || -n "$(git -C "$CODE" status --porcelain)" ]]; then
