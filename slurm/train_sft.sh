@@ -4,6 +4,9 @@
 # Usage (flags repeated on the command line for the safe_submit quota check):
 #   /accounts/projects/berkeleynlp/anyaji/safe_submit.sh sbatch --qos=preemptive \
 #       --gres=gpu:H200:1 --export=ALL,EXP=expA,TRAIN_SIZE=5000,RANK=16,ALPHA=32 slurm/train_sft.sh
+# On another node (e.g. thidwick), add -w <node> and point the logs at horton:
+#   --output=/net/horton/data/wenruixu/workspace/qwen3-function-calling-lora/logs/train_sft_%j.out
+#   --error=/net/horton/data/wenruixu/workspace/qwen3-function-calling-lora/logs/train_sft_%j.err
 #SBATCH --partition=berkeleynlp
 #SBATCH --nodelist=horton
 #SBATCH --qos=preemptive
@@ -19,10 +22,14 @@ set -euo pipefail
 : "${EXP:?set EXP, e.g. expA}" "${TRAIN_SIZE:?set TRAIN_SIZE}" "${RANK:?set RANK}" "${ALPHA:?set ALPHA}"
 
 CODE=/accounts/projects/berkeleynlp/wenruixu/workspace/qwen3-function-calling-lora
-ROOT=/data/wenruixu/workspace/qwen3-function-calling-lora
-PY=/data/wenruixu/venv/qwen3-fc/bin/python
+# Data, environment, and HF cache live on horton's /data; other nodes reach
+# them through the /net/horton autofs path.
+DATA=/data/wenruixu
+[[ $(hostname -s) == horton ]] || DATA=/net/horton/data/wenruixu
+ROOT=$DATA/workspace/qwen3-function-calling-lora
+PY=$DATA/venv/qwen3-fc/bin/python
 MODEL_REVISION=70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
-export HF_HOME=/data/wenruixu/cache/huggingface
+export HF_HOME=$DATA/cache/huggingface
 export HF_HUB_CACHE=$HF_HOME/hub
 export HF_HUB_OFFLINE=1
 
