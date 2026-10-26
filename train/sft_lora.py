@@ -48,8 +48,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dropout", type=float, default=0.05)
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--epochs", type=float, default=1.0)
-    p.add_argument("--batch-size", type=int, default=8, help="per-device micro batch")
-    p.add_argument("--grad-accum", type=int, default=4)
+    p.add_argument("--batch-size", type=int, default=4, help="per-device micro batch")
+    p.add_argument("--grad-accum", type=int, default=8)
     p.add_argument("--warmup-ratio", type=float, default=0.03)
     return p.parse_args()
 
