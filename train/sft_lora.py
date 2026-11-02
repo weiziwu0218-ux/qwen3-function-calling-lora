@@ -45,6 +45,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--rank", type=int, default=16)
     p.add_argument("--alpha", type=int, default=32)
+    p.add_argument("--rslora", action="store_true",
+                   help="rank-stabilized scaling alpha/sqrt(r) instead of alpha/r")
     p.add_argument("--dropout", type=float, default=0.05)
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--epochs", type=float, default=1.0)
@@ -102,6 +104,7 @@ def main() -> None:
         LoraConfig(
             r=args.rank,
             lora_alpha=args.alpha,
+            use_rslora=args.rslora,
             lora_dropout=args.dropout,
             target_modules=TARGET_MODULES,
             task_type="CAUSAL_LM",
@@ -129,8 +132,9 @@ def main() -> None:
         "val_file": str(args.val_file),
         "val_rows": len(data["val"]),
         "seed": SEED,
-        "lora": {"r": args.rank, "alpha": args.alpha, "dropout": args.dropout,
-                 "target_modules": TARGET_MODULES},
+        "lora": {"r": args.rank, "alpha": args.alpha, "rslora": args.rslora,
+                 "scaling": args.alpha / (args.rank ** 0.5 if args.rslora else args.rank),
+                 "dropout": args.dropout, "target_modules": TARGET_MODULES},
         "optim": {"lr": args.lr, "epochs": args.epochs, "per_device_batch": args.batch_size,
                   "grad_accum": args.grad_accum, "warmup_ratio": args.warmup_ratio,
                   "scheduler": "cosine", "precision": "bf16"},
