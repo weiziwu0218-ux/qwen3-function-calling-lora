@@ -71,7 +71,7 @@ for NAME in ${MODELS//:/ }; do
     done
     BFCL_PROJECT_ROOT=$RUN "$VENV/bin/python" "$CODE/bfcl/bfcl_nothink.py" generate \
         --model "$BFCL_MODEL" --test-category "$CATS" --skip-server-setup \
-        --local-model-path "$MODEL" --temperature 0.001
+        --local-model-path "$MODEL" --temperature 0.001 --include-input-log
     BFCL_PROJECT_ROOT=$RUN "$VENV/bin/bfcl" evaluate --model "$BFCL_MODEL" --test-category "$CATS"
     kill "$SERVER"
     wait "$SERVER" || true
