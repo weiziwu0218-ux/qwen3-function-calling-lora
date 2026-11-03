@@ -9,6 +9,10 @@
 # Usage (flags repeated on the command line for the safe_submit quota check):
 #   /accounts/projects/berkeleynlp/anyaji/safe_submit.sh sbatch --qos=preemptive --gres=gpu:H200:1 \
 #       --export=ALL,EXP=expB,MODELS=sft_n59000_r4rs_4144596,CATEGORIES=simple_python:multiple slurm/bfcl_eval.sh
+# On another node (e.g. feanor in the songmei partition, qos normal), add -p <partition>
+# -w <node> and point the logs at horton:
+#   --output=/net/horton/data/wenruixu/workspace/qwen3-function-calling-lora/logs/bfcl_eval_%j.out
+#   --error=/net/horton/data/wenruixu/workspace/qwen3-function-calling-lora/logs/bfcl_eval_%j.err
 #SBATCH --partition=berkeleynlp
 #SBATCH --nodelist=horton
 #SBATCH --qos=preemptive
@@ -24,9 +28,13 @@ set -euo pipefail
 : "${EXP:?set EXP, e.g. expB}" "${MODELS:?set MODELS}" "${CATEGORIES:?set CATEGORIES}"
 
 CODE=/accounts/projects/berkeleynlp/wenruixu/workspace/qwen3-function-calling-lora
+# Data, environment, and HF cache live on horton's /data; other nodes reach
+# them through the /net/horton autofs path. The venv's console scripts carry
+# horton-local shebangs, so vllm, bfcl and pip run through python -m.
 DATA=/data/wenruixu
+[[ $(hostname -s) == horton ]] || DATA=/net/horton/data/wenruixu
 ROOT=$DATA/workspace/qwen3-function-calling-lora
-VENV=$DATA/venv/bfcl
+PY=$DATA/venv/bfcl/bin/python
 BFCL_MODEL=Qwen/Qwen3-1.7B-FC
 CATS=${CATEGORIES//:/,}
 PORT=$((20000 + SLURM_JOB_ID % 20000))
@@ -51,7 +59,7 @@ mkdir -p "$OUT"
 
 echo "start $(date -Iseconds) host $(hostname) job ${SLURM_JOB_ID} commit $(git -C "$CODE" rev-parse HEAD) out $OUT"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
-"$VENV/bin/pip" freeze | grep -iE "^(bfcl-eval|vllm|torch|transformers)=="
+"$PY" -m pip freeze | grep -iE "^(bfcl[-_]eval|vllm|torch|transformers)=="
 
 SERVER=""
 trap '[[ -n $SERVER ]] && kill $SERVER 2>/dev/null' EXIT
@@ -61,7 +69,7 @@ for NAME in ${MODELS//:/ }; do
     RUN=$OUT/$NAME
     mkdir -p "$RUN"
     echo "model $NAME $(date -Iseconds)"
-    "$VENV/bin/vllm" serve "$MODEL" --port "$PORT" --dtype float16 --max-model-len 4096 \
+    "$PY" -m vllm.entrypoints.cli.main serve "$MODEL" --port "$PORT" --dtype float16 --max-model-len 4096 \
         --gpu-memory-utilization 0.6 --swap-space 0 --enforce-eager --max-num-seqs 1 --seed 42 \
         > "$RUN/vllm_server.log" 2>&1 &
     SERVER=$!
@@ -69,10 +77,10 @@ for NAME in ${MODELS//:/ }; do
         kill -0 "$SERVER"
         sleep 5
     done
-    BFCL_PROJECT_ROOT=$RUN "$VENV/bin/python" "$CODE/bfcl/bfcl_nothink.py" generate \
+    BFCL_PROJECT_ROOT=$RUN "$PY" "$CODE/bfcl/bfcl_nothink.py" generate \
         --model "$BFCL_MODEL" --test-category "$CATS" --skip-server-setup \
         --local-model-path "$MODEL" --temperature 0.001 --include-input-log
-    BFCL_PROJECT_ROOT=$RUN "$VENV/bin/bfcl" evaluate --model "$BFCL_MODEL" --test-category "$CATS"
+    BFCL_PROJECT_ROOT=$RUN "$PY" -m bfcl_eval evaluate --model "$BFCL_MODEL" --test-category "$CATS"
     kill "$SERVER"
     wait "$SERVER" || true
     SERVER=""
