@@ -31,8 +31,9 @@ echo "start $(date -Iseconds) host $(hostname) job ${SLURM_JOB_ID} commit $(git 
 if [[ ! -x $VENV/bin/python ]]; then
     /usr/bin/python3.12 -m venv "$VENV"
     "$VENV/bin/pip" install -q --upgrade pip
-    # transformers is pinned to the release current with vLLM 0.8.5.
-    "$VENV/bin/pip" install -q "bfcl-eval[oss-eval-vllm]==2026.3.23" "transformers==4.51.3"
+    # transformers is pinned to the release current with vLLM 0.8.5; qwen-agent
+    # (a bfcl-eval dependency) imports soundfile without declaring it.
+    "$VENV/bin/pip" install -q "bfcl-eval[oss-eval-vllm]==2026.3.23" "transformers==4.51.3" soundfile
 fi
 "$VENV/bin/pip" freeze > "$ROOT/env/pip_freeze_bfcl_${SLURM_JOB_ID}.txt"
 "$VENV/bin/python" -c "import vllm, bfcl_eval, transformers, torch; print('vllm', vllm.__version__, 'transformers', transformers.__version__, 'torch', torch.__version__)"
