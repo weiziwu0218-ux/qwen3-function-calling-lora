@@ -53,6 +53,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--train-file", type=Path, required=True)
     p.add_argument("--val-file", type=Path, required=True)
     p.add_argument("--samples-file", type=Path, required=True, help="output of build_pairs.py")
+    p.add_argument("--negatives-file", type=Path,
+                   help="make_negatives.py output (neg_<N>.jsonl); its first --num-negatives rows add refusal pairs")
+    p.add_argument("--source-file", type=Path,
+                   help="the converted file the negatives were drawn from, for their original calls")
+    p.add_argument("--num-negatives", type=int, default=0)
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--rank", type=int, default=16)
     p.add_argument("--alpha", type=int, default=32)
@@ -88,6 +93,23 @@ def load_pairs(path: Path, samples: dict) -> tuple[int, list[dict]]:
     if not pairs:
         raise SystemExit(f"no wrong samples for any row of {path}")
     return len(rows), pairs
+
+
+def load_negative_pairs(path: Path, source_path: Path, k: int) -> list[dict]:
+    """Refusal pairs from the first k negatives: on the prompt whose called tools were
+    removed, the refusal is chosen and the original xLAM call, which now names a tool
+    that is not offered, is rejected."""
+    negatives = [json.loads(line) for _, line in zip(range(k), path.open())]
+    if len(negatives) < k:
+        raise SystemExit(f"{path} has {len(negatives)} negatives, fewer than {k}")
+    needed = {row["source_id"] for row in negatives}
+    calls = {}
+    for line in source_path.open():
+        row = json.loads(line)
+        if row["id"] in needed:
+            calls[row["id"]] = row["completion"].removesuffix("\n")
+    return [{"prompt": row["prompt"], "chosen": row["completion"].removesuffix("\n"),
+             "rejected": calls[row["source_id"]]} for row in negatives]
 
 
 def tokenize_fn(tokenizer):
@@ -181,6 +203,9 @@ def main() -> None:
     sampler = json.loads(Path(f"{args.samples_file}.config.json").read_text())
     train_prompts, train_pairs = load_pairs(args.train_file, samples)
     val_prompts, val_pairs = load_pairs(args.val_file, samples)
+    negative_pairs = []
+    if args.num_negatives:
+        negative_pairs = load_negative_pairs(args.negatives_file, args.source_file, args.num_negatives)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model, revision=args.revision)
     model = AutoModelForCausalLM.from_pretrained(
@@ -199,7 +224,8 @@ def main() -> None:
     )
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    data = DatasetDict({"train": Dataset.from_list(train_pairs), "val": Dataset.from_list(val_pairs)})
+    data = DatasetDict({"train": Dataset.from_list(train_pairs + negative_pairs),
+                        "val": Dataset.from_list(val_pairs)})
     data = data.map(tokenize_fn(tokenizer), remove_columns=data["train"].column_names)
     train_lengths = [len(ids) for key in ("chosen", "rejected")
                      for ids in data["train"][f"{key}_input_ids"]]
@@ -217,6 +243,8 @@ def main() -> None:
         "train_file": str(args.train_file),
         "train_prompts": train_prompts,
         "train_pairs": len(train_pairs),
+        "negatives_file": str(args.negatives_file) if negative_pairs else None,
+        "negative_pairs": len(negative_pairs),
         "val_file": str(args.val_file),
         "val_prompts": val_prompts,
         "val_pairs": len(val_pairs),
