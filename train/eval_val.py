@@ -30,19 +30,54 @@ CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 
 
 def parse_calls(text: str):
-    """Return a list of (name, canonical-arguments) or None on a parse failure."""
+    """
+    Returns:
+        list: Valid tool calls, or [] for no tool call.
+        None: Malformed tool-call output.
+    """
     blocks = CALL_RE.findall(text)
+
     if not blocks:
+        # A malformed tool-call tag is still a parse failure.
+        if "<tool_call" in text or "</tool_call" in text:
+            return None
+
+        # No tool call was made.
+        return []
+
+    # Reject unbalanced or extra tool-call tags.
+    if (
+        text.count("<tool_call>") != len(blocks)
+        or text.count("</tool_call>") != len(blocks)
+    ):
         return None
+
     calls = []
+
     for block in blocks:
         try:
             call = json.loads(block)
-            if not isinstance(call, dict) or "name" not in call:
+
+            if not isinstance(call, dict):
                 return None
-            calls.append(canonical(call["name"], call.get("arguments", {})))
-        except json.JSONDecodeError:
+
+            name = call.get("name")
+            arguments = call.get("arguments", {})
+
+            if not isinstance(name, str):
+                return None
+
+            if isinstance(arguments, str):
+                arguments = json.loads(arguments)
+
+            if not isinstance(arguments, dict):
+                return None
+
+            calls.append(canonical(name, arguments))
+
+        except (json.JSONDecodeError, TypeError, ValueError):
             return None
+
     return calls
 
 
