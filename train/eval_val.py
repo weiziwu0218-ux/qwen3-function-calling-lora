@@ -6,10 +6,10 @@ think block, which is what ``apply_chat_template(..., enable_thinking=False)``
 produces. Decoding is greedy, so the result is deterministic.
 
 A prediction is an exact match when its multiset of (name, arguments) equals
-the reference, ignoring call order. A parse failure is an output with no
-<tool_call> block or with a block that is not valid JSON. A negative row (one
-whose reference makes no call, from make_negatives.py) is correct when the
-output makes no tool call; parse failures are counted on the other rows only.
+the reference, ignoring call order. An output with no tool call parses to no
+calls, so it matches a negative row (one whose reference makes no call, from
+make_negatives.py). A parse failure is an output with a malformed <tool_call>
+block or a block that is not a valid call.
 """
 
 from __future__ import annotations
@@ -132,19 +132,15 @@ def main() -> None:
             for row, text in zip(batch, texts):
                 pred = parse_calls(text)
                 ref = reference_calls(row)
-                if ref:
-                    exact = pred is not None and Counter(pred) == Counter(ref)
-                else:
-                    exact = CALL_RE.search(text) is None
+                exact = pred is not None and Counter(pred) == Counter(ref)
                 stats["n"] += 1
                 stats["n_negative"] += not ref
-                stats["parse_failure"] += bool(ref) and pred is None
+                stats["parse_failure"] += pred is None
                 stats["exact_match"] += exact
                 out.write(json.dumps({"id": row["id"], "exact_match": exact,
                                       "parse_failure": pred is None, "output": text},
                                      ensure_ascii=False) + "\n")
     seconds = time.time() - start
-    n_positive = stats["n"] - stats["n_negative"]
 
     result = {
         "adapter": str(args.adapter) if args.adapter else None,
@@ -154,7 +150,7 @@ def main() -> None:
         "n": stats["n"],
         "n_negative": stats["n_negative"],
         "exact_match": stats["exact_match"] / stats["n"],
-        "parse_failure_rate": stats["parse_failure"] / n_positive if n_positive else None,
+        "parse_failure_rate": stats["parse_failure"] / stats["n"],
         "generation_seconds": seconds,
     }
     (args.output_dir / "val_metrics.json").write_text(json.dumps(result, indent=2) + "\n")
