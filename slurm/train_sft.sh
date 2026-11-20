@@ -2,11 +2,15 @@
 # GPU job: formal LoRA SFT runs plus their validation-set scoring. TRAIN_SIZES and
 # RANKS are colon-separated lists; every size x rank pair runs one after another on
 # the same GPU. RSLORA=1 switches to rank-stabilized scaling alpha/sqrt(r).
+# NEGS (colon-separated negative counts, 0 = none) trains on the mixes that
+# slurm/make_negatives.sh wrote to $ROOT/data/negatives and also scores every run
+# on val_neg200.jsonl, in $RUN/val_neg.
 # Formal runs use the SCF checkout on a clean, current main.
 # Usage (flags repeated on the command line for the safe_submit quota check):
 #   /accounts/projects/berkeleynlp/anyaji/safe_submit.sh sbatch --qos=preemptive \
 #       --gres=gpu:H200:1 --export=ALL,EXP=expA,TRAIN_SIZES=10000:5000,RANKS=16,ALPHA=32 slurm/train_sft.sh
 #   experiment B: --export=ALL,EXP=expB,TRAIN_SIZES=59000,RANKS=4:8:32,ALPHA=8,RSLORA=1
+#   negatives:    --time=05:00:00 --export=ALL,EXP=expNeg,TRAIN_SIZES=59000,NEGS=1000:5000:10000,RANKS=16,ALPHA=32
 # On another node (e.g. thidwick), add -w <node> and point the logs at horton:
 #   --output=/net/horton/data/wenruixu/workspace/qwen3-function-calling-lora/logs/train_sft_%j.out
 #   --error=/net/horton/data/wenruixu/workspace/qwen3-function-calling-lora/logs/train_sft_%j.err
@@ -51,17 +55,28 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
 SCALING=() TAG=""
 if [[ "${RSLORA:-0}" == 1 ]]; then SCALING=(--rslora) TAG=rs; fi
 
+NEG_DIR=$ROOT/data/negatives
 for TRAIN_SIZE in ${TRAIN_SIZES//:/ }; do
-    for RANK in ${RANKS//:/ }; do
-        RUN=$ROOT/runs/$EXP/sft_n${TRAIN_SIZE}_r${RANK}${TAG}_${SLURM_JOB_ID}
-        echo "run $RUN $(date -Iseconds)"
-        "$PY" "$CODE/train/sft_lora.py" --revision "$MODEL_REVISION" \
-            --train-file "$ROOT/data/processed/train_${TRAIN_SIZE}.jsonl" \
-            --val-file "$ROOT/data/processed/val.jsonl" \
-            --output-dir "$RUN" --rank "$RANK" --alpha "$ALPHA" "${SCALING[@]}"
-        "$PY" "$CODE/train/eval_val.py" --revision "$MODEL_REVISION" \
-            --adapter "$RUN/adapter" --val-file "$ROOT/data/processed/val.jsonl" \
-            --output-dir "$RUN/val"
+    NEG_LIST=${NEGS:-0}
+    for NEG in ${NEG_LIST//:/ }; do
+        TRAIN_FILE=$ROOT/data/processed/train_${TRAIN_SIZE}.jsonl NAME=sft_n${TRAIN_SIZE}
+        if [[ $NEG != 0 ]]; then TRAIN_FILE=$NEG_DIR/train_${TRAIN_SIZE}_neg${NEG}.jsonl NAME=${NAME}_neg${NEG}; fi
+        for RANK in ${RANKS//:/ }; do
+            RUN=$ROOT/runs/$EXP/${NAME}_r${RANK}${TAG}_${SLURM_JOB_ID}
+            echo "run $RUN $(date -Iseconds)"
+            "$PY" "$CODE/train/sft_lora.py" --revision "$MODEL_REVISION" \
+                --train-file "$TRAIN_FILE" \
+                --val-file "$ROOT/data/processed/val.jsonl" \
+                --output-dir "$RUN" --rank "$RANK" --alpha "$ALPHA" "${SCALING[@]}"
+            "$PY" "$CODE/train/eval_val.py" --revision "$MODEL_REVISION" \
+                --adapter "$RUN/adapter" --val-file "$ROOT/data/processed/val.jsonl" \
+                --output-dir "$RUN/val"
+            if [[ -n ${NEGS:-} ]]; then
+                "$PY" "$CODE/train/eval_val.py" --revision "$MODEL_REVISION" \
+                    --adapter "$RUN/adapter" --val-file "$NEG_DIR/val_neg200.jsonl" \
+                    --output-dir "$RUN/val_neg"
+            fi
+        done
     done
 done
 echo "end $(date -Iseconds)"
