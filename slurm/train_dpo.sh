@@ -3,7 +3,9 @@
 # RANKS are colon-separated lists; every size x rank pair runs one after another on
 # the same GPU. RSLORA=1 switches to rank-stabilized scaling alpha/sqrt(r); BETA and
 # LR default to 0.1 and 2e-5. Pairs come from $ROOT/data/dpo/base_samples.jsonl, so
-# run slurm/build_pairs.sh on the same TRAIN_SIZES first.
+# run slurm/build_pairs.sh on the same TRAIN_SIZES first. NEGS adds that many refusal
+# pairs from slurm/make_negatives.sh's negatives ($ROOT/data/negatives) and also
+# scores every run on val_neg200.jsonl, in $RUN/val_neg.
 # Formal runs use the SCF checkout on a clean, current main.
 # Usage (flags repeated on the command line for the safe_submit quota check):
 #   /accounts/projects/berkeleynlp/anyaji/safe_submit.sh sbatch --qos=preemptive \
@@ -53,6 +55,12 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
 
 SCALING=() TAG=""
 if [[ "${RSLORA:-0}" == 1 ]]; then SCALING=(--rslora) TAG=rs; fi
+NEG_DIR=$ROOT/data/negatives NEGATIVES=()
+if [[ -n ${NEGS:-} ]]; then
+    NEGATIVES=(--negatives-file "$NEG_DIR/neg_10000.jsonl" --source-file "$ROOT/data/processed/train_59000.jsonl"
+               --num-negatives "$NEGS")
+    TAG=${TAG}_neg${NEGS}
+fi
 
 for TRAIN_SIZE in ${TRAIN_SIZES//:/ }; do
     for RANK in ${RANKS//:/ }; do
@@ -63,10 +71,15 @@ for TRAIN_SIZE in ${TRAIN_SIZES//:/ }; do
             --val-file "$ROOT/data/processed/val.jsonl" \
             --samples-file "$ROOT/data/dpo/base_samples.jsonl" \
             --output-dir "$RUN" --rank "$RANK" --alpha "$ALPHA" "${SCALING[@]}" \
-            --beta "$BETA" --lr "$LR"
+            --beta "$BETA" --lr "$LR" "${NEGATIVES[@]}"
         "$PY" "$CODE/train/eval_val.py" --revision "$MODEL_REVISION" \
             --adapter "$RUN/adapter" --val-file "$ROOT/data/processed/val.jsonl" \
             --output-dir "$RUN/val"
+        if [[ -n ${NEGS:-} ]]; then
+            "$PY" "$CODE/train/eval_val.py" --revision "$MODEL_REVISION" \
+                --adapter "$RUN/adapter" --val-file "$NEG_DIR/val_neg200.jsonl" \
+                --output-dir "$RUN/val_neg"
+        fi
     done
 done
 echo "end $(date -Iseconds)"
